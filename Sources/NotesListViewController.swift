@@ -1,11 +1,18 @@
 import UIKit
 
-/// 備忘錄列表：搜尋、新增、左滑刪除、右滑置頂
+/// 備忘錄列表：搜尋、分類篩選、AI 分類、新增、左滑刪除、右滑置頂
 final class NotesListViewController: UITableViewController {
 
     private let store = NoteStore.shared
     private var displayedNotes: [Note] = []
     private let searchController = UISearchController(searchResultsController: nil)
+    private var selectedCategory: String?
+    /// Apple Intelligence 分類進行中的狀態文字
+    private var classifyProgress: String?
+    private lazy var filterItem = UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease.circle"),
+                                                  menu: UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+        completion(self?.filterMenuElements() ?? [])
+    }]))
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -38,6 +45,8 @@ final class NotesListViewController: UITableViewController {
         addItem.style = .prominent
         toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), addItem]
 
+        navigationItem.rightBarButtonItem = filterItem
+
         // 往下捲動時縮小導覽列，捲回頂端才恢復
         navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
         navigationItem.navigationBarMinimization.restorationBehavior = .atScrollEdge
@@ -54,14 +63,103 @@ final class NotesListViewController: UITableViewController {
 
     @objc private func reload() {
         let keyword = searchController.searchBar.text?.trimmingCharacters(in: .whitespaces) ?? ""
-        if keyword.isEmpty {
-            displayedNotes = store.sortedNotes
-        } else {
-            displayedNotes = store.sortedNotes.filter { $0.text.localizedCaseInsensitiveContains(keyword) }
+        var notes = store.sortedNotes
+        if let selectedCategory {
+            notes = notes.filter { $0.category == selectedCategory }
         }
-        navigationItem.subtitle = "\(store.notes.count) 則備忘錄"
+        if !keyword.isEmpty {
+            notes = notes.filter {
+                $0.plainText.localizedCaseInsensitiveContains(keyword)
+                    || ($0.category?.contains(keyword) ?? false)
+                    || ($0.location?.name.localizedCaseInsensitiveContains(keyword) ?? false)
+            }
+        }
+        displayedNotes = notes
+        filterItem.image = UIImage(systemName: selectedCategory == nil
+                                   ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+        updateSubtitle()
         tableView.reloadData()
         updateEmptyState()
+    }
+
+    private func updateSubtitle() {
+        if let classifyProgress {
+            navigationItem.subtitle = classifyProgress
+        } else if let selectedCategory {
+            navigationItem.subtitle = "\(selectedCategory) · \(displayedNotes.count) 則"
+        } else {
+            navigationItem.subtitle = "\(store.notes.count) 則備忘錄"
+        }
+    }
+
+    // MARK: - 分類
+
+    /// 右上角選單：依分類篩選 + Apple Intelligence 批次分類
+    private func filterMenuElements() -> [UIMenuElement] {
+        let counts = Dictionary(grouping: store.notes.compactMap(\.category), by: { $0 }).mapValues(\.count)
+        let all = UIAction(title: "全部", image: UIImage(systemName: "tray.full"),
+                           state: selectedCategory == nil ? .on : .off) { [weak self] _ in
+            self?.selectedCategory = nil
+            self?.reload()
+        }
+        let categories = NoteCategory.all.map { category in
+            let action = UIAction(title: category, image: UIImage(systemName: NoteCategory.icon(for: category)),
+                                  state: selectedCategory == category ? .on : .off) { [weak self] _ in
+                self?.selectedCategory = category
+                self?.reload()
+            }
+            action.subtitle = "\(counts[category] ?? 0) 則"
+            return action
+        }
+        let busy: UIMenuElement.Attributes = classifyProgress == nil ? [] : .disabled
+        let ai = [
+            UIAction(title: "自動分類未分類的備忘錄", image: UIImage(systemName: "apple.intelligence"),
+                     attributes: busy) { [weak self] _ in self?.classifyNotes(onlyUnclassified: true) },
+            UIAction(title: "全部重新分類", image: UIImage(systemName: "arrow.triangle.2.circlepath"),
+                     attributes: busy) { [weak self] _ in self?.classifyNotes(onlyUnclassified: false) }
+        ]
+        ([all] + categories + ai).forEach { $0.preferredImageVisibility = .visible }
+        return [
+            UIMenu(title: "依分類顯示", options: .displayInline, children: [all] + categories),
+            UIMenu(title: "Apple Intelligence", options: .displayInline, children: ai)
+        ]
+    }
+
+    /// 用 Apple Intelligence 逐則分類
+    private func classifyNotes(onlyUnclassified: Bool) {
+        if let reason = NoteClassifier.unavailableReason {
+            return showAlert("無法使用 Apple Intelligence", reason)
+        }
+        let targets = store.notes.filter {
+            !$0.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && (!onlyUnclassified || $0.category == nil)
+        }
+        guard !targets.isEmpty else { return showAlert("沒有需要分類的備忘錄") }
+        Task {
+            for (index, note) in targets.enumerated() {
+                classifyProgress = "Apple Intelligence 分類中 \(index + 1)/\(targets.count)…"
+                updateSubtitle()
+                do {
+                    store.setCategory(id: note.id, try await NoteClassifier.classify(note.plainText))
+                } catch {
+                    classifyProgress = nil
+                    reload()
+                    return showAlert("分類失敗", error.localizedDescription)
+                }
+            }
+            classifyProgress = nil
+            reload()
+        }
+    }
+
+    private func classifyNote(_ note: Note) {
+        Task {
+            do {
+                store.setCategory(id: note.id, try await NoteClassifier.classify(note.plainText))
+            } catch {
+                showAlert("分類失敗", error.localizedDescription)
+            }
+        }
     }
 
     private func updateEmptyState() {
@@ -71,9 +169,17 @@ final class NotesListViewController: UITableViewController {
         }
         var config = UIContentUnavailableConfiguration.empty()
         let searching = !(searchController.searchBar.text ?? "").isEmpty
-        config.image = UIImage(systemName: searching ? "magnifyingglass" : "note.text")
-        config.text = searching ? "找不到符合的備忘錄" : "還沒有備忘錄"
-        config.secondaryText = searching ? nil : "點右下角的編寫按鈕新增第一則"
+        if searching {
+            config.image = UIImage(systemName: "magnifyingglass")
+            config.text = "找不到符合的備忘錄"
+        } else if let selectedCategory {
+            config.image = UIImage(systemName: NoteCategory.icon(for: selectedCategory))
+            config.text = "「\(selectedCategory)」沒有備忘錄"
+        } else {
+            config.image = UIImage(systemName: "note.text")
+            config.text = "還沒有備忘錄"
+            config.secondaryText = "點右下角的編寫按鈕新增第一則"
+        }
         tableView.backgroundView = UIContentUnavailableView(configuration: config)
     }
 
@@ -111,9 +217,9 @@ final class NotesListViewController: UITableViewController {
         content.text = note.title
         content.textProperties.font = .preferredFont(forTextStyle: .headline)
         content.textProperties.numberOfLines = 1
-        content.secondaryText = "\(dateText(for: note.updatedAt))  \(note.preview)"
+        content.secondaryAttributedText = detailText(for: note)
         content.secondaryTextProperties.color = .secondaryLabel
-        content.secondaryTextProperties.numberOfLines = 1
+        content.secondaryTextProperties.numberOfLines = 2
         content.textToSecondaryTextVerticalPadding = 4
         if note.isPinned {
             content.image = UIImage(systemName: "pin.fill")
@@ -123,6 +229,27 @@ final class NotesListViewController: UITableViewController {
         cell.contentConfiguration = content
         cell.accessoryType = .disclosureIndicator
         return cell
+    }
+
+    /// 第一行：日期 + 預覽；有分類或地點時第二行顯示標籤
+    private func detailText(for note: Note) -> NSAttributedString {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.preferredFont(forTextStyle: .subheadline),
+            .foregroundColor: UIColor.secondaryLabel
+        ]
+        let detail = NSMutableAttributedString(string: "\(dateText(for: note.updatedAt))  \(note.preview)",
+                                               attributes: attributes)
+        var tags: [(symbol: String, label: String)] = []
+        if let category = note.category { tags.append((NoteCategory.icon(for: category), category)) }
+        if let location = note.location { tags.append(("mappin", location.name)) }
+        for (index, tag) in tags.enumerated() {
+            detail.append(NSAttributedString(string: index == 0 ? "\n" : "   ", attributes: attributes))
+            if let image = UIImage(systemName: tag.symbol)?.withTintColor(.systemOrange, renderingMode: .alwaysOriginal) {
+                detail.append(NSAttributedString(attachment: NSTextAttachment(image: image)))
+            }
+            detail.append(NSAttributedString(string: " " + tag.label, attributes: attributes))
+        }
+        return detail
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -146,14 +273,18 @@ final class NotesListViewController: UITableViewController {
                                   attributes: .destructive) { _ in
                 self?.store.delete(id: note.id)
             }
-            let actions = [pin, share, delete]
-            actions.forEach { $0.preferredImageVisibility = .visible }
-            return UIMenu(children: actions)
+            let category = UIMenu.category(current: note.category, onAutoClassify: {
+                self?.classifyNote(note)
+            }, onSelect: { category in
+                self?.store.setCategory(id: note.id, category)
+            })
+            [pin, share, delete].forEach { $0.preferredImageVisibility = .visible }
+            return UIMenu(children: [pin, category, share, delete])
         }
     }
 
     private func share(_ note: Note, from indexPath: IndexPath) {
-        let vc = UIActivityViewController(activityItems: [note.text], applicationActivities: nil)
+        let vc = UIActivityViewController(activityItems: [note.plainText], applicationActivities: nil)
         vc.popoverPresentationController?.sourceView = tableView.cellForRow(at: indexPath)
         present(vc, animated: true)
     }

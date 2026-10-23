@@ -19,6 +19,7 @@ targets:
         CFBundleVersion: "1"
         CFBundleDevelopmentRegion: zh-Hant
         UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: 在備忘錄加上你目前的位置
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

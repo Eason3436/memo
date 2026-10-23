@@ -51,6 +51,13 @@ final class NoteStore {
         save()
     }
 
+    /// 設定分類（不算修改內容，所以不更新修改時間）
+    func setCategory(id: UUID, _ category: String?) {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
+        notes[index].category = category
+        save()
+    }
+
     func delete(id: UUID) {
         notes.removeAll { $0.id == id }
         save()
