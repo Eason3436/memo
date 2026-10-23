@@ -6,7 +6,6 @@ final class NotesListViewController: UITableViewController {
     private let store = NoteStore.shared
     private var displayedNotes: [Note] = []
     private let searchController = UISearchController(searchResultsController: nil)
-    private let countLabel = UILabel()
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -34,23 +33,14 @@ final class NotesListViewController: UITableViewController {
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
 
-        // 底部工具列
+        // 底部工具列：搜尋列 + 新增按鈕
         let addItem = UIBarButtonItem(barButtonSystemItem: .compose, target: self, action: #selector(addNote))
-        if #available(iOS 26.0, *) {
-            // iOS 26 起：搜尋列收進底部工具列，數量改顯示在標題下方
-            addItem.style = .prominent
-            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), addItem]
-        } else {
-            countLabel.font = .preferredFont(forTextStyle: .footnote)
-            countLabel.textColor = .secondaryLabel
-            toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: countLabel), .flexibleSpace(), addItem]
-        }
+        addItem.style = .prominent
+        toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), addItem]
 
-        if #available(iOS 27.0, *) {
-            // iOS 27：往下捲動時縮小導覽列，捲回頂端才恢復
-            navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
-            navigationItem.navigationBarMinimization.restorationBehavior = .atScrollEdge
-        }
+        // 往下捲動時縮小導覽列，捲回頂端才恢復
+        navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
+        navigationItem.navigationBarMinimization.restorationBehavior = .atScrollEdge
 
         NotificationCenter.default.addObserver(self, selector: #selector(reload),
                                                name: .notesDidChange, object: nil)
@@ -69,13 +59,7 @@ final class NotesListViewController: UITableViewController {
         } else {
             displayedNotes = store.sortedNotes.filter { $0.text.localizedCaseInsensitiveContains(keyword) }
         }
-        let countText = "\(store.notes.count) 則備忘錄"
-        if #available(iOS 26.0, *) {
-            navigationItem.subtitle = countText
-        } else {
-            countLabel.text = countText
-            countLabel.sizeToFit()
-        }
+        navigationItem.subtitle = "\(store.notes.count) 則備忘錄"
         tableView.reloadData()
         updateEmptyState()
     }
@@ -163,10 +147,7 @@ final class NotesListViewController: UITableViewController {
                 self?.store.delete(id: note.id)
             }
             let actions = [pin, share, delete]
-            if #available(iOS 27.0, *) {
-                // iOS 27：選單一律顯示圖示
-                actions.forEach { $0.preferredImageVisibility = .visible }
-            }
+            actions.forEach { $0.preferredImageVisibility = .visible }
             return UIMenu(children: actions)
         }
     }

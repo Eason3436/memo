@@ -1,6 +1,6 @@
 # 備忘錄 MemoApp（UIKit）
 
-純程式碼 UIKit 備忘錄 App，不使用 Storyboard，最低支援 iOS 17。
+純程式碼 UIKit 備忘錄 App，不使用 Storyboard，最低支援 iOS 27。
 
 ## 功能
 - 新增、編輯（自動儲存）、刪除備忘錄

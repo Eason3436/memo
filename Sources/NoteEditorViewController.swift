@@ -26,10 +26,7 @@ final class NoteEditorViewController: UIViewController {
         textView.keyboardDismissMode = .interactive
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         textView.delegate = self
-        if #available(iOS 27.0, *) {
-            // iOS 27：輸入時標出文法問題
-            textView.grammarCheckingType = .yes
-        }
+        textView.grammarCheckingType = .yes
         textView.text = store.note(id: noteID)?.text
         view.addSubview(textView)
 
@@ -44,11 +41,9 @@ final class NoteEditorViewController: UIViewController {
         let share = UIBarButtonItem(image: UIImage(systemName: "square.and.arrow.up"),
                                     style: .plain, target: self, action: #selector(shareNote))
         let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
-        if #available(iOS 27.0, *) {
-            // iOS 27：空間不夠時，「更多」先收起，分享按鈕保留
-            share.visibilityPriority = .high
-            more.visibilityPriority = .low
-        }
+        // 空間不夠時，「更多」先收起，分享按鈕保留
+        share.visibilityPriority = .high
+        more.visibilityPriority = .low
         navigationItem.rightBarButtonItems = [more, share]
         toolbarItems = []
         updateTitle()
@@ -83,10 +78,8 @@ final class NoteEditorViewController: UIViewController {
                                   attributes: .destructive) { [weak self] _ in
                 self?.confirmDelete()
             }
-            if #available(iOS 27.0, *) {
-                pin.subtitle = note.isPinned ? nil : "固定在列表最上方"
-                [pin, delete].forEach { $0.preferredImageVisibility = .visible }
-            }
+            pin.subtitle = note.isPinned ? nil : "固定在列表最上方"
+            [pin, delete].forEach { $0.preferredImageVisibility = .visible }
             completion([pin, delete])
         }])
     }
