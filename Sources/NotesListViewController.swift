@@ -34,14 +34,23 @@ final class NotesListViewController: UITableViewController {
         navigationItem.hidesSearchBarWhenScrolling = false
         definesPresentationContext = true
 
-        // 底部工具列：數量 + 新增按鈕
-        countLabel.font = .preferredFont(forTextStyle: .footnote)
-        countLabel.textColor = .secondaryLabel
-        let flexible = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-        let countItem = UIBarButtonItem(customView: countLabel)
-        let addItem = UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"),
-                                      style: .plain, target: self, action: #selector(addNote))
-        toolbarItems = [flexible, countItem, flexible, addItem]
+        // 底部工具列
+        let addItem = UIBarButtonItem(barButtonSystemItem: .compose, target: self, action: #selector(addNote))
+        if #available(iOS 26.0, *) {
+            // iOS 26 起：搜尋列收進底部工具列，數量改顯示在標題下方
+            addItem.style = .prominent
+            toolbarItems = [navigationItem.searchBarPlacementBarButtonItem, .flexibleSpace(), addItem]
+        } else {
+            countLabel.font = .preferredFont(forTextStyle: .footnote)
+            countLabel.textColor = .secondaryLabel
+            toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: countLabel), .flexibleSpace(), addItem]
+        }
+
+        if #available(iOS 27.0, *) {
+            // iOS 27：往下捲動時縮小導覽列，捲回頂端才恢復
+            navigationItem.navigationBarMinimization.minimizationBehavior = .onScrollDown
+            navigationItem.navigationBarMinimization.restorationBehavior = .atScrollEdge
+        }
 
         NotificationCenter.default.addObserver(self, selector: #selector(reload),
                                                name: .notesDidChange, object: nil)
@@ -60,8 +69,13 @@ final class NotesListViewController: UITableViewController {
         } else {
             displayedNotes = store.sortedNotes.filter { $0.text.localizedCaseInsensitiveContains(keyword) }
         }
-        countLabel.text = "\(store.notes.count) 則備忘錄"
-        countLabel.sizeToFit()
+        let countText = "\(store.notes.count) 則備忘錄"
+        if #available(iOS 26.0, *) {
+            navigationItem.subtitle = countText
+        } else {
+            countLabel.text = countText
+            countLabel.sizeToFit()
+        }
         tableView.reloadData()
         updateEmptyState()
     }
@@ -75,7 +89,7 @@ final class NotesListViewController: UITableViewController {
         let searching = !(searchController.searchBar.text ?? "").isEmpty
         config.image = UIImage(systemName: searching ? "magnifyingglass" : "note.text")
         config.text = searching ? "找不到符合的備忘錄" : "還沒有備忘錄"
-        config.secondaryText = searching ? nil : "點右下角的按鈕新增第一則"
+        config.secondaryText = searching ? nil : "點右下角的編寫按鈕新增第一則"
         tableView.backgroundView = UIContentUnavailableView(configuration: config)
     }
 
@@ -130,6 +144,37 @@ final class NotesListViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         openEditor(for: displayedNotes[indexPath.row].id)
+    }
+
+    // 長按選單：置頂、分享、刪除
+    override func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath,
+                            point: CGPoint) -> UIContextMenuConfiguration? {
+        let note = displayedNotes[indexPath.row]
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            let pin = UIAction(title: note.isPinned ? "取消置頂" : "置頂",
+                               image: UIImage(systemName: note.isPinned ? "pin.slash" : "pin")) { _ in
+                self?.store.togglePin(id: note.id)
+            }
+            let share = UIAction(title: "分享", image: UIImage(systemName: "square.and.arrow.up")) { _ in
+                self?.share(note, from: indexPath)
+            }
+            let delete = UIAction(title: "刪除", image: UIImage(systemName: "trash"),
+                                  attributes: .destructive) { _ in
+                self?.store.delete(id: note.id)
+            }
+            let actions = [pin, share, delete]
+            if #available(iOS 27.0, *) {
+                // iOS 27：選單一律顯示圖示
+                actions.forEach { $0.preferredImageVisibility = .visible }
+            }
+            return UIMenu(children: actions)
+        }
+    }
+
+    private func share(_ note: Note, from indexPath: IndexPath) {
+        let vc = UIActivityViewController(activityItems: [note.text], applicationActivities: nil)
+        vc.popoverPresentationController?.sourceView = tableView.cellForRow(at: indexPath)
+        present(vc, animated: true)
     }
 
     // 左滑刪除

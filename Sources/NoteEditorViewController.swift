@@ -26,6 +26,10 @@ final class NoteEditorViewController: UIViewController {
         textView.keyboardDismissMode = .interactive
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         textView.delegate = self
+        if #available(iOS 27.0, *) {
+            // iOS 27：輸入時標出文法問題
+            textView.grammarCheckingType = .yes
+        }
         textView.text = store.note(id: noteID)?.text
         view.addSubview(textView)
 
@@ -39,9 +43,13 @@ final class NoteEditorViewController: UIViewController {
 
         let share = UIBarButtonItem(image: UIImage(systemName: "square.and.arrow.up"),
                                     style: .plain, target: self, action: #selector(shareNote))
-        let delete = UIBarButtonItem(image: UIImage(systemName: "trash"),
-                                     style: .plain, target: self, action: #selector(confirmDelete))
-        navigationItem.rightBarButtonItems = [share, delete]
+        let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
+        if #available(iOS 27.0, *) {
+            // iOS 27：空間不夠時，「更多」先收起，分享按鈕保留
+            share.visibilityPriority = .high
+            more.visibilityPriority = .low
+        }
+        navigationItem.rightBarButtonItems = [more, share]
         toolbarItems = []
         updateTitle()
     }
@@ -62,14 +70,35 @@ final class NoteEditorViewController: UIViewController {
         navigationItem.title = count == 0 ? "" : "\(count) 字"
     }
 
+    /// 「更多」選單：每次打開時依目前狀態產生（置頂狀態會變）
+    private func makeMoreMenu() -> UIMenu {
+        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+            guard let self, let note = self.store.note(id: self.noteID) else { return completion([]) }
+            let pin = UIAction(title: note.isPinned ? "取消置頂" : "置頂",
+                               image: UIImage(systemName: note.isPinned ? "pin.slash" : "pin")) { [weak self] _ in
+                guard let self else { return }
+                self.store.togglePin(id: self.noteID)
+            }
+            let delete = UIAction(title: "刪除", image: UIImage(systemName: "trash"),
+                                  attributes: .destructive) { [weak self] _ in
+                self?.confirmDelete()
+            }
+            if #available(iOS 27.0, *) {
+                pin.subtitle = note.isPinned ? nil : "固定在列表最上方"
+                [pin, delete].forEach { $0.preferredImageVisibility = .visible }
+            }
+            completion([pin, delete])
+        }])
+    }
+
     @objc private func shareNote() {
         guard !textView.text.isEmpty else { return }
         let vc = UIActivityViewController(activityItems: [textView.text ?? ""], applicationActivities: nil)
-        vc.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItems?.first
+        vc.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItems?.last
         present(vc, animated: true)
     }
 
-    @objc private func confirmDelete() {
+    private func confirmDelete() {
         let alert = UIAlertController(title: "刪除這則備忘錄？", message: "刪除後無法復原。",
                                       preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "刪除", style: .destructive) { [weak self] _ in
@@ -78,7 +107,7 @@ final class NoteEditorViewController: UIViewController {
             self.navigationController?.popViewController(animated: true)
         })
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItems?.last
+        alert.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItems?.first
         present(alert, animated: true)
     }
 }
