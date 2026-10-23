@@ -13,7 +13,8 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: 備忘錄
+        CFBundleDisplayName: MemoApp
+        CFBundleName: MemoApp
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         CFBundleDevelopmentRegion: zh-Hant
